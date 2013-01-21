@@ -1,0 +1,63 @@
+### tools for copying files into a chroot jail
+# osx_cp_bin.sh - copies a binary and all its lib dependencies
+
+### procedures for setting up a chroot jail on OS X
+# check for unused ids
+dscl . -list /Users UniqueID
+dscl . -list /Groups PrimaryGroupID
+
+# this will be the new root
+JAIL=/var/chroot/alcatraz
+# group for chrooted users
+PRISONERGRP=badguys
+# an example user we'll create
+PRISONER=capone
+
+# create the group
+dscl . -create /Groups/$PRISONERGRP
+dscl . -createprop /Groups/$PRISONERGRP PrimaryGroupID $UNUSED_GRPID
+
+# create the user with shell=bash and homedir=$JAIL/Users/$PRISONER
+dscl . -create /Users/$PRISONER
+dscl . -createprop /Users/$PRISONER UniqueID $UNUSED_UID
+dscl . -createprop /Users/$PRISONER UserShell /bin/bash
+dscl . -createprop /Users/$PRISONER RealName "$PRISONER"
+dscl . -createprop /Users/$PRISONER NFSHomeDirectory /Users/$PRISONER
+dscl . -createprop /Users/$PRISONER home /Users/$PRISONER
+dscl . -passwd /Users/$PRISONER ====PASSWORDGOESHERE====
+dscl . -append /Groups/com.apple.access_ssh GroupMembership $PRISONER
+mkdir -p $JAIL/Users/$PRISONER
+ln -s $JAIL/Users/$PRISONER /Users/$PRISONER
+
+# add user to group
+dscl . -createprop /Users/$PRISONER PrimaryGroupID $UNUSED_ID
+dscl . -createprop /Groups/$PRISONERGRP users $PRISONER
+
+###############
+# create the chroot environment
+chown -R ${PRISONER}:${PRISONERGRP} $JAIL/Users/$PRISONER
+
+## in /etc/sshd_config:
+# I use passwordless logins only, so:
+set UsePAM No
+# if you use PAM you will have to add the PAM libs to the jail
+# replace $vars here with literal values:
+Match Group $PRISONERS
+      X11Forwarding no
+      AllowTcpForwarding no
+      ChrootDirectory $JAIL/%u
+
+# add chrooted user's public key
+mkdir -p $JAIL/Users/$PRISONER/.ssh
+cat prisonerskey.pub >> $JAIL/Users/$PRISONER/.ssh/authorized_keys
+
+# setup a minimal bash environment
+mkdir -p ${JAIL}/{bin,dev,usr/lib/system,usr/include}
+cp -p /usr/lib/dyld ${JAIL}/usr/lib/
+mknod ${JAIL}/dev/null c 1 3
+mknod ${JAIL}/dev/zero c 1 5
+chmod 0666 ${JAIL}/dev/{null,zero}
+
+./osx_cp_bin.sh /bin/bash ${JAIL}
+./osx_cp_bin.sh /usr/lib/libSystem.B.dylib${JAIL}
+
